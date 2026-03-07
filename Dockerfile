@@ -49,5 +49,13 @@ ENV NODE_ENV=production \
 
 EXPOSE 3100
 
-USER paperclip
+COPY <<'ENTRYPOINT' /usr/local/bin/entrypoint.sh
+#!/bin/bash
+chown -R paperclip:paperclip /paperclip
+exec gosu paperclip "$@"
+ENTRYPOINT
+RUN apt-get update && apt-get install -y --no-install-recommends gosu && rm -rf /var/lib/apt/lists/* \
+  && chmod +x /usr/local/bin/entrypoint.sh
+
+ENTRYPOINT ["entrypoint.sh"]
 CMD ["node", "--import", "./server/node_modules/tsx/dist/loader.mjs", "server/dist/index.js"]
