@@ -53,6 +53,19 @@ EXPOSE 3100
 COPY <<'ENTRYPOINT' /usr/local/bin/entrypoint.sh
 #!/bin/bash
 chown -R paperclip:paperclip /paperclip
+
+# Auto-clone project workspaces if missing
+clone_if_missing() {
+  local dir="$1" repo="$2"
+  if [ ! -d "$dir/.git" ] && [ -n "$repo" ] && [ -n "$GITHUB_TOKEN" ]; then
+    local auth_url="${repo/https:\/\//https:\/\/x-access-token:${GITHUB_TOKEN}@}"
+    echo "[entrypoint] Cloning $repo into $dir"
+    gosu paperclip git clone "$auth_url" "$dir" 2>&1 || echo "[entrypoint] Clone failed for $repo"
+  fi
+}
+clone_if_missing "/paperclip/instances/default/workspace/classtap/checkin-app" "https://github.com/zackdesign/checkin-app.git"
+clone_if_missing "/paperclip/instances/default/workspace/trading-co/trading-bot" "https://github.com/zackdesign/trading-bot.git"
+
 exec gosu paperclip "$@"
 ENTRYPOINT
 RUN apt-get update && apt-get install -y --no-install-recommends gosu && rm -rf /var/lib/apt/lists/* \
