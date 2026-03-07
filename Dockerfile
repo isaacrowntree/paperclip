@@ -34,7 +34,7 @@ COPY --from=build /app /app
 RUN npm install --global --omit=dev @anthropic-ai/claude-code@latest @openai/codex@latest
 
 RUN groupadd -r paperclip && useradd -r -g paperclip -d /paperclip -s /bin/bash paperclip \
-  && mkdir -p /paperclip && chown -R paperclip:paperclip /paperclip
+  && mkdir -p /paperclip && chown -R paperclip:paperclip /paperclip /app
 
 ENV NODE_ENV=production \
   HOME=/paperclip \
