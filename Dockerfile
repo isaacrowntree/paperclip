@@ -31,7 +31,8 @@ RUN test -f server/dist/index.js || (echo "ERROR: server build output missing" &
 FROM base AS production
 WORKDIR /app
 COPY --from=build /app /app
-RUN npm install --global --omit=dev @anthropic-ai/claude-code@latest @openai/codex@latest
+RUN npm install --global --omit=dev @anthropic-ai/claude-code@latest @openai/codex@latest \
+  && curl -fsSL https://railway.com/install.sh | sh
 
 RUN groupadd -r paperclip && useradd -r -g paperclip -d /paperclip -s /bin/bash paperclip \
   && mkdir -p /paperclip && chown -R paperclip:paperclip /paperclip /app
