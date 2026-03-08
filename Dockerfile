@@ -66,6 +66,17 @@ clone_if_missing() {
 clone_if_missing "/paperclip/instances/default/workspace/classtap/checkin-app" "https://github.com/zackdesign/checkin-app.git"
 clone_if_missing "/paperclip/instances/default/workspace/trading-co/trading-bot" "https://github.com/zackdesign/trading-bot.git"
 
+# Build cloned projects if dist/ is missing
+build_if_needed() {
+  local dir="$1"
+  if [ -d "$dir" ] && [ ! -f "$dir/dist/index.js" ]; then
+    echo "[entrypoint] Building project in $dir"
+    cd "$dir" && gosu paperclip npm install 2>&1 && gosu paperclip npx tsc 2>&1 || echo "[entrypoint] Build failed for $dir"
+    cd /app
+  fi
+}
+build_if_needed "/paperclip/instances/default/workspace/trading-co/trading-bot"
+
 exec gosu paperclip "$@"
 ENTRYPOINT
 RUN apt-get update && apt-get install -y --no-install-recommends gosu && rm -rf /var/lib/apt/lists/* \
