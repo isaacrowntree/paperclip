@@ -15,6 +15,14 @@ export const createCompanyInviteSchema = z.object({
 
 export type CreateCompanyInvite = z.infer<typeof createCompanyInviteSchema>;
 
+export const createOpenClawInvitePromptSchema = z.object({
+  agentMessage: z.string().max(4000).optional().nullable(),
+});
+
+export type CreateOpenClawInvitePrompt = z.infer<
+  typeof createOpenClawInvitePromptSchema
+>;
+
 export const acceptInviteSchema = z.object({
   requestType: z.enum(JOIN_REQUEST_TYPES),
   agentName: z.string().min(1).max(120).optional(),
@@ -43,6 +51,28 @@ export const claimJoinRequestApiKeySchema = z.object({
 });
 
 export type ClaimJoinRequestApiKey = z.infer<typeof claimJoinRequestApiKeySchema>;
+
+export const boardCliAuthAccessLevelSchema = z.enum([
+  "board",
+  "instance_admin_required",
+]);
+
+export type BoardCliAuthAccessLevel = z.infer<typeof boardCliAuthAccessLevelSchema>;
+
+export const createCliAuthChallengeSchema = z.object({
+  command: z.string().min(1).max(240),
+  clientName: z.string().max(120).optional().nullable(),
+  requestedAccess: boardCliAuthAccessLevelSchema.default("board"),
+  requestedCompanyId: z.string().uuid().optional().nullable(),
+});
+
+export type CreateCliAuthChallenge = z.infer<typeof createCliAuthChallengeSchema>;
+
+export const resolveCliAuthChallengeSchema = z.object({
+  token: z.string().min(16).max(256),
+});
+
+export type ResolveCliAuthChallenge = z.infer<typeof resolveCliAuthChallengeSchema>;
 
 export const updateMemberPermissionsSchema = z.object({
   grants: z.array(

@@ -18,23 +18,21 @@ import { PageTabBar } from "../components/PageTabBar";
 import { Tabs } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Bot, Plus, List, GitBranch, SlidersHorizontal } from "lucide-react";
-import type { Agent } from "@paperclipai/shared";
+import { AGENT_ROLE_LABELS, type Agent } from "@paperclipai/shared";
 
 const adapterLabels: Record<string, string> = {
   claude_local: "Claude",
   codex_local: "Codex",
+  gemini_local: "Gemini",
   opencode_local: "OpenCode",
   cursor: "Cursor",
-  openclaw: "OpenClaw",
+  hermes_local: "Hermes",
+  openclaw_gateway: "OpenClaw Gateway",
   process: "Process",
   http: "HTTP",
 };
 
-const roleLabels: Record<string, string> = {
-  ceo: "CEO", cto: "CTO", cmo: "CMO", cfo: "CFO",
-  engineer: "Engineer", designer: "Designer", pm: "PM",
-  qa: "QA", devops: "DevOps", researcher: "Researcher", general: "General",
-};
+const roleLabels = AGENT_ROLE_LABELS as Record<string, string>;
 
 type FilterTab = "all" | "active" | "paused" | "error";
 
@@ -48,17 +46,21 @@ function matchesFilter(status: string, tab: FilterTab, showTerminated: boolean):
 }
 
 function filterAgents(agents: Agent[], tab: FilterTab, showTerminated: boolean): Agent[] {
-  return agents.filter((a) => matchesFilter(a.status, tab, showTerminated));
+  return agents
+    .filter((a) => matchesFilter(a.status, tab, showTerminated))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function filterOrgTree(nodes: OrgNode[], tab: FilterTab, showTerminated: boolean): OrgNode[] {
-  return nodes.reduce<OrgNode[]>((acc, node) => {
-    const filteredReports = filterOrgTree(node.reports, tab, showTerminated);
-    if (matchesFilter(node.status, tab, showTerminated) || filteredReports.length > 0) {
-      acc.push({ ...node, reports: filteredReports });
-    }
-    return acc;
-  }, []);
+  return nodes
+    .reduce<OrgNode[]>((acc, node) => {
+      const filteredReports = filterOrgTree(node.reports, tab, showTerminated);
+      if (matchesFilter(node.status, tab, showTerminated) || filteredReports.length > 0) {
+        acc.push({ ...node, reports: filteredReports });
+      }
+      return acc;
+    }, [])
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export function Agents() {
@@ -230,7 +232,7 @@ export function Agents() {
               <EntityRow
                 key={agent.id}
                 title={agent.name}
-                subtitle={`${agent.role}${agent.title ? ` - ${agent.title}` : ""}`}
+                subtitle={`${roleLabels[agent.role] ?? agent.role}${agent.title ? ` - ${agent.title}` : ""}`}
                 to={agentUrl(agent)}
                 leading={
                   <span className="relative flex h-2.5 w-2.5">
@@ -402,7 +404,7 @@ function LiveRunIndicator({
       onClick={(e) => e.stopPropagation()}
     >
       <span className="relative flex h-2 w-2">
-        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+        <span className="animate-pulse absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
         <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
       </span>
       <span className="text-[11px] font-medium text-blue-600 dark:text-blue-400">

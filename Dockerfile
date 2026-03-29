@@ -16,26 +16,30 @@ COPY packages/adapter-utils/package.json packages/adapter-utils/
 COPY packages/adapters/claude-local/package.json packages/adapters/claude-local/
 COPY packages/adapters/codex-local/package.json packages/adapters/codex-local/
 COPY packages/adapters/cursor-local/package.json packages/adapters/cursor-local/
-COPY packages/adapters/openclaw/package.json packages/adapters/openclaw/
+COPY packages/adapters/gemini-local/package.json packages/adapters/gemini-local/
+COPY packages/adapters/openclaw-gateway/package.json packages/adapters/openclaw-gateway/
 COPY packages/adapters/opencode-local/package.json packages/adapters/opencode-local/
-RUN pnpm install --no-frozen-lockfile
+COPY packages/adapters/pi-local/package.json packages/adapters/pi-local/
+COPY packages/plugins/sdk/package.json packages/plugins/sdk/
+COPY patches/ patches/
+
+RUN pnpm install --frozen-lockfile
 
 FROM base AS build
 WORKDIR /app
 COPY --from=deps /app /app
 COPY . .
 RUN pnpm --filter @paperclipai/ui build
+RUN pnpm --filter @paperclipai/plugin-sdk build
 RUN pnpm --filter @paperclipai/server build
 RUN test -f server/dist/index.js || (echo "ERROR: server build output missing" && exit 1)
 
 FROM base AS production
 WORKDIR /app
-COPY --from=build /app /app
-RUN npm install --global --omit=dev @anthropic-ai/claude-code@latest @openai/codex@latest \
-  && curl -fsSL https://railway.com/install.sh | sh
-
-RUN groupadd -r paperclip && useradd -r -g paperclip -d /paperclip -s /bin/bash paperclip \
-  && mkdir -p /paperclip && chown -R paperclip:paperclip /paperclip /app
+COPY --chown=node:node --from=build /app /app
+RUN npm install --global --omit=dev @anthropic-ai/claude-code@latest @openai/codex@latest opencode-ai \
+  && mkdir -p /paperclip \
+  && chown node:node /paperclip
 
 ENV NODE_ENV=production \
   HOME=/paperclip \
@@ -48,39 +52,8 @@ ENV NODE_ENV=production \
   PAPERCLIP_DEPLOYMENT_MODE=authenticated \
   PAPERCLIP_DEPLOYMENT_EXPOSURE=private
 
+VOLUME ["/paperclip"]
 EXPOSE 3100
 
-COPY <<'ENTRYPOINT' /usr/local/bin/entrypoint.sh
-#!/bin/bash
-chown -R paperclip:paperclip /paperclip
-
-# Auto-clone project workspaces if missing
-clone_if_missing() {
-  local dir="$1" repo="$2"
-  if [ ! -d "$dir/.git" ] && [ -n "$repo" ] && [ -n "$GITHUB_TOKEN" ]; then
-    local auth_url="${repo/https:\/\//https:\/\/x-access-token:${GITHUB_TOKEN}@}"
-    echo "[entrypoint] Cloning $repo into $dir"
-    gosu paperclip git clone "$auth_url" "$dir" 2>&1 || echo "[entrypoint] Clone failed for $repo"
-  fi
-}
-clone_if_missing "/paperclip/instances/default/workspace/classtap/checkin-app" "https://github.com/zackdesign/checkin-app.git"
-clone_if_missing "/paperclip/instances/default/workspace/trading-co/trading-bot" "https://github.com/zackdesign/trading-bot.git"
-
-# Build cloned projects if dist/ is missing
-build_if_needed() {
-  local dir="$1"
-  if [ -d "$dir" ] && [ ! -f "$dir/dist/index.js" ]; then
-    echo "[entrypoint] Building project in $dir"
-    cd "$dir" && gosu paperclip npm install 2>&1 && gosu paperclip npx tsc 2>&1 || echo "[entrypoint] Build failed for $dir"
-    cd /app
-  fi
-}
-build_if_needed "/paperclip/instances/default/workspace/trading-co/trading-bot"
-
-exec gosu paperclip "$@"
-ENTRYPOINT
-RUN apt-get update && apt-get install -y --no-install-recommends gosu && rm -rf /var/lib/apt/lists/* \
-  && chmod +x /usr/local/bin/entrypoint.sh
-
-ENTRYPOINT ["entrypoint.sh"]
+USER node
 CMD ["node", "--import", "./server/node_modules/tsx/dist/loader.mjs", "server/dist/index.js"]
