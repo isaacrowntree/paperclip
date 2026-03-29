@@ -31,7 +31,8 @@ COPY --from=deps /app /app
 COPY . .
 RUN pnpm --filter @paperclipai/ui build
 RUN pnpm --filter @paperclipai/plugin-sdk build
-RUN cd server && npx tsc --noEmit false --skipLibCheck true 2>/dev/null; mkdir -p dist/onboarding-assets && cp -R src/onboarding-assets/. dist/onboarding-assets/
+RUN pnpm --filter @paperclipai/server exec tsc --noEmitOnError false || true
+RUN mkdir -p server/dist/onboarding-assets && cp -R server/src/onboarding-assets/. server/dist/onboarding-assets/
 RUN test -f server/dist/index.js || (echo "ERROR: server build output missing" && exit 1)
 
 FROM base AS production
