@@ -56,4 +56,5 @@ VOLUME ["/paperclip"]
 EXPOSE 3100
 
 USER node
-CMD ["node", "--import", "./server/node_modules/tsx/dist/loader.mjs", "server/dist/index.js"]
+# One-time cleanup: purge stale backup dumps (Railway Postgres handles backups)
+CMD ["bash", "-c", "rm -rf /paperclip/instances/default/data/backups/*.sql 2>/dev/null; exec node --import ./server/node_modules/tsx/dist/loader.mjs server/dist/index.js"]
