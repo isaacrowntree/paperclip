@@ -52,8 +52,9 @@ ENV NODE_ENV=production \
   PAPERCLIP_DEPLOYMENT_MODE=authenticated \
   PAPERCLIP_DEPLOYMENT_EXPOSURE=private
 
+RUN apt-get update && apt-get install -y --no-install-recommends gosu && rm -rf /var/lib/apt/lists/*
+
 EXPOSE 3100
 
-USER node
-# One-time cleanup: purge stale backup dumps (Railway Postgres handles backups)
-CMD ["bash", "-c", "rm -rf /paperclip/instances/default/data/backups/*.sql 2>/dev/null; exec node --import ./server/node_modules/tsx/dist/loader.mjs server/dist/index.js"]
+# Fix volume ownership (migrated from paperclip→node user), purge stale backups, then drop to node
+CMD ["bash", "-c", "gosu root chown -R node:node /paperclip 2>/dev/null; rm -rf /paperclip/instances/default/data/backups/*.sql 2>/dev/null; exec gosu node node --import ./server/node_modules/tsx/dist/loader.mjs server/dist/index.js"]
