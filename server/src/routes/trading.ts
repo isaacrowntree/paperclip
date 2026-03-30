@@ -20,6 +20,28 @@ function getWorkspaceBase(): string {
   return resolve(PAPERCLIP_HOME, "instances", INSTANCE_ID, "workspace");
 }
 
+// Map company names to their workspace bot data paths
+const COMPANY_BOT_PATHS: Record<string, { stateFile: string; tradeFile: string; type: string }[]> = {};
+
+function getBotPaths(companyName: string, wsBase: string): { stateFile: string; tradeFile: string; type: string }[] {
+  const lower = companyName.toLowerCase();
+  if (lower.includes("trading") || lower.includes("binance") || lower.includes("zack")) {
+    return [{
+      stateFile: resolve(wsBase, "trading-co", "trading-bot", "bot-state.json"),
+      tradeFile: resolve(wsBase, "trading-co", "trading-bot", "trade-history.json"),
+      type: "binance",
+    }];
+  }
+  if (lower.includes("ibkr") || lower.includes("fund") || lower.includes("interactive")) {
+    return [{
+      stateFile: resolve(wsBase, "ibkr-fund", "bot-state.json"),
+      tradeFile: resolve(wsBase, "ibkr-fund", "trade-history.json"),
+      type: "ibkr",
+    }];
+  }
+  return [];
+}
+
 export function tradingRoutes(db: Db) {
   const router = Router();
 
@@ -29,24 +51,23 @@ export function tradingRoutes(db: Db) {
 
     const wsBase = getWorkspaceBase();
 
-    // IBKR Fund data
-    const ibkrState = readJsonSafe(resolve(wsBase, "ibkr-fund", "bot-state.json"));
-    const ibkrTrades = readJsonSafe(resolve(wsBase, "ibkr-fund", "trade-history.json"));
-
-    // Binance Trading Bot data
-    const binanceState = readJsonSafe(resolve(wsBase, "trading-co", "trading-bot", "bot-state.json"));
-    const binanceTrades = readJsonSafe(resolve(wsBase, "trading-co", "trading-bot", "trade-history.json"));
-
-    res.json({
-      ibkr: {
-        state: ibkrState,
-        trades: ibkrTrades || [],
-      },
-      binance: {
-        state: binanceState,
-        trades: binanceTrades || [],
-      },
+    // Look up company name to determine which bot data to return
+    const companies = await db.query.companies.findMany({
+      where: (c, { eq }) => eq(c.id, companyId),
+      columns: { id: true, name: true },
     });
+    const company = companies[0];
+    const bots = company ? getBotPaths(company.name, wsBase) : [];
+
+    const result: Record<string, { state: unknown; trades: unknown }> = {};
+    for (const bot of bots) {
+      result[bot.type] = {
+        state: readJsonSafe(bot.stateFile),
+        trades: readJsonSafe(bot.tradeFile) || [],
+      };
+    }
+
+    res.json(result);
   });
 
   return router;

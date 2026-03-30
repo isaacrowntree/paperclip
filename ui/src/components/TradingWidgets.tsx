@@ -205,15 +205,20 @@ export function TradingWidgets({ companyId }: { companyId: string }) {
 
   if (isLoading || !data) return null;
 
-  const hasIbkr = data.ibkr.state !== null;
-  const hasBinance = data.binance.state !== null;
+  // Server returns only the relevant bot type for this company
+  const response = data as Record<string, { state: Record<string, unknown> | null; trades: unknown[] }>;
+  const ibkr = response.ibkr;
+  const binance = response.binance;
+
+  const hasIbkr = ibkr?.state != null;
+  const hasBinance = binance?.state != null;
 
   if (!hasIbkr && !hasBinance) return null;
 
   return (
     <div className="space-y-4">
-      {hasIbkr && <IBKRWidgets state={data.ibkr.state!} trades={data.ibkr.trades} />}
-      {hasBinance && <BinanceWidgets state={data.binance.state!} trades={data.binance.trades} />}
+      {hasIbkr && <IBKRWidgets state={ibkr.state!} trades={ibkr.trades} />}
+      {hasBinance && <BinanceWidgets state={binance.state!} trades={binance.trades} />}
     </div>
   );
 }
