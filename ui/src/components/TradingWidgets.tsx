@@ -206,7 +206,7 @@ export function TradingWidgets({ companyId }: { companyId: string }) {
   if (isLoading || !data) return null;
 
   // Server returns only the relevant bot type for this company
-  const response = data as Record<string, { state: Record<string, unknown> | null; trades: unknown[] }>;
+  const response = data as unknown as Record<string, { state: Record<string, unknown> | null; trades: unknown[] }>;
   const ibkr = response.ibkr;
   const binance = response.binance;
 
