@@ -2092,6 +2092,10 @@ export function heartbeatService(db: Db) {
         .limit(1)
         .then((rows) => rows[0] ?? null);
       executionProjectId = companyProject?.id ?? null;
+      // Inject into context so resolveWorkspaceForRun can find the project workspace.
+      if (executionProjectId) {
+        context.projectId = executionProjectId;
+      }
     }
     const projectExecutionWorkspacePolicy = executionProjectId
       ? await db
