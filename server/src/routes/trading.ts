@@ -1,8 +1,11 @@
 import { Router } from "express";
 import type { Db } from "@paperclipai/db";
+import { projects, projectWorkspaces } from "@paperclipai/db";
+import { eq, and, isNull } from "drizzle-orm";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { assertCompanyAccess } from "./authz.js";
+import { resolveManagedProjectWorkspaceDir } from "../home-paths.js";
 
 const PAPERCLIP_HOME = process.env.PAPERCLIP_HOME || process.env.HOME || "/paperclip";
 const INSTANCE_ID = process.env.PAPERCLIP_INSTANCE_ID || "default";
@@ -16,30 +19,40 @@ function readJsonSafe(filePath: string): unknown {
   }
 }
 
-function getWorkspaceBase(): string {
+function getLegacyWorkspaceBase(): string {
   return resolve(PAPERCLIP_HOME, "instances", INSTANCE_ID, "workspace");
 }
 
-// Map company names to their workspace bot data paths
-const COMPANY_BOT_PATHS: Record<string, { stateFile: string; tradeFile: string; type: string }[]> = {};
+interface BotPath { stateFile: string; tradeFile: string; type: string }
 
-function getBotPaths(companyName: string, wsBase: string): { stateFile: string; tradeFile: string; type: string }[] {
+function getBotPathsForDir(dir: string, type: string): BotPath {
+  return {
+    stateFile: resolve(dir, "bot-state.json"),
+    tradeFile: resolve(dir, "trade-history.json"),
+    type,
+  };
+}
+
+function getLegacyBotPaths(companyName: string): BotPath[] {
   const lower = companyName.toLowerCase();
+  const wsBase = getLegacyWorkspaceBase();
   if (lower.includes("trading") || lower.includes("binance") || lower.includes("zack")) {
-    return [{
-      stateFile: resolve(wsBase, "trading-co", "trading-bot", "bot-state.json"),
-      tradeFile: resolve(wsBase, "trading-co", "trading-bot", "trade-history.json"),
-      type: "binance",
-    }];
+    return [getBotPathsForDir(resolve(wsBase, "trading-co", "trading-bot"), "binance")];
   }
   if (lower.includes("ibkr") || lower.includes("fund") || lower.includes("interactive")) {
-    return [{
-      stateFile: resolve(wsBase, "ibkr-fund", "bot-state.json"),
-      tradeFile: resolve(wsBase, "ibkr-fund", "trade-history.json"),
-      type: "ibkr",
-    }];
+    return [getBotPathsForDir(resolve(wsBase, "ibkr-fund"), "ibkr")];
   }
   return [];
+}
+
+function deriveRepoName(repoUrl: string | null): string | null {
+  if (!repoUrl) return null;
+  try {
+    const parsed = new URL(repoUrl);
+    return parsed.pathname.replace(/\/+$/, "").split("/").filter(Boolean).pop()?.replace(/\.git$/i, "") ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export function tradingRoutes(db: Db) {
@@ -49,15 +62,51 @@ export function tradingRoutes(db: Db) {
     const companyId = req.params.companyId as string;
     assertCompanyAccess(req, companyId);
 
-    const wsBase = getWorkspaceBase();
-
-    // Look up company name to determine which bot data to return
+    // Look up company name
     const companies = await db.query.companies.findMany({
-      where: (c, { eq }) => eq(c.id, companyId),
+      where: (c, { eq: eqFn }) => eqFn(c.id, companyId),
       columns: { id: true, name: true },
     });
     const company = companies[0];
-    const bots = company ? getBotPaths(company.name, wsBase) : [];
+    if (!company) {
+      res.json({});
+      return;
+    }
+
+    // Try managed workspace paths first (via project_workspaces)
+    let bots: BotPath[] = [];
+    const companyProjects = await db
+      .select({ id: projects.id })
+      .from(projects)
+      .where(and(eq(projects.companyId, companyId), isNull(projects.archivedAt)));
+    for (const project of companyProjects) {
+      const workspaceRows = await db
+        .select({ repoUrl: projectWorkspaces.repoUrl })
+        .from(projectWorkspaces)
+        .where(and(eq(projectWorkspaces.companyId, companyId), eq(projectWorkspaces.projectId, project.id)));
+      for (const ws of workspaceRows) {
+        const repoName = deriveRepoName(ws.repoUrl);
+        const managedDir = resolveManagedProjectWorkspaceDir({
+          companyId,
+          projectId: project.id,
+          repoName,
+        });
+        if (existsSync(managedDir)) {
+          const lower = company.name.toLowerCase();
+          const type = (lower.includes("ibkr") || lower.includes("fund") || lower.includes("interactive"))
+            ? "ibkr"
+            : (lower.includes("trading") || lower.includes("binance") || lower.includes("zack"))
+              ? "binance"
+              : "unknown";
+          bots.push(getBotPathsForDir(managedDir, type));
+        }
+      }
+    }
+
+    // Fall back to legacy hardcoded workspace paths
+    if (bots.length === 0) {
+      bots = getLegacyBotPaths(company.name);
+    }
 
     const result: Record<string, { state: unknown; trades: unknown }> = {};
     for (const bot of bots) {
