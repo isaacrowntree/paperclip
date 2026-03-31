@@ -73,12 +73,21 @@ export function tradingRoutes(db: Db) {
       return;
     }
 
-    // Try managed workspace paths first (via project_workspaces)
-    let bots: BotPath[] = [];
+    // Collect all candidate directories: managed workspace paths + legacy paths.
+    // State files are runtime artifacts that may live in either location.
+    const candidateDirs: { dir: string; type: string }[] = [];
+
+    // Managed workspace paths (via project_workspaces)
     const companyProjects = await db
       .select({ id: projects.id })
       .from(projects)
       .where(and(eq(projects.companyId, companyId), isNull(projects.archivedAt)));
+    const lower = company.name.toLowerCase();
+    const botType = (lower.includes("ibkr") || lower.includes("fund") || lower.includes("interactive"))
+      ? "ibkr"
+      : (lower.includes("trading") || lower.includes("binance") || lower.includes("zack"))
+        ? "binance"
+        : "unknown";
     for (const project of companyProjects) {
       const workspaceRows = await db
         .select({ repoUrl: projectWorkspaces.repoUrl })
@@ -92,20 +101,28 @@ export function tradingRoutes(db: Db) {
           repoName,
         });
         if (existsSync(managedDir)) {
-          const lower = company.name.toLowerCase();
-          const type = (lower.includes("ibkr") || lower.includes("fund") || lower.includes("interactive"))
-            ? "ibkr"
-            : (lower.includes("trading") || lower.includes("binance") || lower.includes("zack"))
-              ? "binance"
-              : "unknown";
-          bots.push(getBotPathsForDir(managedDir, type));
+          candidateDirs.push({ dir: managedDir, type: botType });
         }
       }
     }
 
-    // Fall back to legacy hardcoded workspace paths
-    if (bots.length === 0) {
-      bots = getLegacyBotPaths(company.name);
+    // Always include legacy paths as candidates too
+    for (const legacy of getLegacyBotPaths(company.name)) {
+      const dir = resolve(legacy.stateFile, "..");
+      candidateDirs.push({ dir, type: legacy.type });
+    }
+
+    // Pick the first candidate that has a bot-state.json, or fall back to first candidate
+    let bots: BotPath[] = [];
+    for (const c of candidateDirs) {
+      const stateFile = resolve(c.dir, "bot-state.json");
+      if (existsSync(stateFile)) {
+        bots = [getBotPathsForDir(c.dir, c.type)];
+        break;
+      }
+    }
+    if (bots.length === 0 && candidateDirs.length > 0) {
+      bots = [getBotPathsForDir(candidateDirs[0].dir, candidateDirs[0].type)];
     }
 
     const result: Record<string, { state: unknown; trades: unknown }> = {};
