@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
-import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import type { BillingType, ExecutionWorkspace, ExecutionWorkspaceConfig } from "@paperclipai/shared";
 import {
@@ -1161,7 +1161,7 @@ export function heartbeatService(db: Db) {
     agent: typeof agents.$inferSelect,
     context: Record<string, unknown>,
     previousSessionParams: Record<string, unknown> | null,
-    opts?: { useProjectWorkspace?: boolean | null },
+    opts?: { useProjectWorkspace?: boolean | null; overrideProjectId?: string | null },
   ): Promise<ResolvedWorkspaceForRun> {
     const issueId = readNonEmptyString(context.issueId);
     const contextProjectId = readNonEmptyString(context.projectId);
@@ -1179,7 +1179,7 @@ export function heartbeatService(db: Db) {
     const issueProjectId = issueProjectRef?.projectId ?? null;
     const preferredProjectWorkspaceId =
       issueProjectRef?.projectWorkspaceId ?? contextProjectWorkspaceId ?? null;
-    const resolvedProjectId = issueProjectId ?? contextProjectId;
+    const resolvedProjectId = issueProjectId ?? contextProjectId ?? opts?.overrideProjectId ?? null;
     const useProjectWorkspace = opts?.useProjectWorkspace !== false;
     const workspaceProjectId = useProjectWorkspace ? resolvedProjectId : null;
 
@@ -2088,14 +2088,11 @@ export function heartbeatService(db: Db) {
       const companyProject = await db
         .select({ id: projects.id })
         .from(projects)
-        .where(and(eq(projects.companyId, agent.companyId), sql`${projects.archivedAt} IS NULL`))
+        .where(and(eq(projects.companyId, agent.companyId), isNull(projects.archivedAt)))
+        .orderBy(asc(projects.createdAt), asc(projects.id))
         .limit(1)
         .then((rows) => rows[0] ?? null);
       executionProjectId = companyProject?.id ?? null;
-      // Inject into context so resolveWorkspaceForRun can find the project workspace.
-      if (executionProjectId) {
-        context.projectId = executionProjectId;
-      }
     }
     const projectExecutionWorkspacePolicy = executionProjectId
       ? await db
@@ -2136,7 +2133,10 @@ export function heartbeatService(db: Db) {
       agent,
       context,
       previousSessionParams,
-      { useProjectWorkspace: requestedExecutionWorkspaceMode !== "agent_default" },
+      {
+        useProjectWorkspace: requestedExecutionWorkspaceMode !== "agent_default",
+        overrideProjectId: executionProjectId,
+      },
     );
     const issueRef = issueContext
       ? {
