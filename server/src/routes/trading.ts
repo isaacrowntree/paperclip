@@ -1,7 +1,7 @@
 import { Router } from "express";
 import type { Db } from "@paperclipai/db";
 import { projects, projectWorkspaces } from "@paperclipai/db";
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and, asc, isNull } from "drizzle-orm";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { assertCompanyAccess } from "./authz.js";
@@ -81,7 +81,8 @@ export function tradingRoutes(db: Db) {
     const companyProjects = await db
       .select({ id: projects.id })
       .from(projects)
-      .where(and(eq(projects.companyId, companyId), isNull(projects.archivedAt)));
+      .where(and(eq(projects.companyId, companyId), isNull(projects.archivedAt)))
+      .orderBy(asc(projects.createdAt), asc(projects.id));
     const lower = company.name.toLowerCase();
     const botType = (lower.includes("ibkr") || lower.includes("fund") || lower.includes("interactive"))
       ? "ibkr"
