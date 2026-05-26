@@ -26,6 +26,7 @@ import { ChartCard, RunActivityChart, PriorityChart, IssueStatusChart, SuccessRa
 import { PageSkeleton } from "../components/PageSkeleton";
 import type { Agent, Issue } from "@paperclipai/shared";
 import { PluginSlotOutlet } from "@/plugins/slots";
+import { TradingWidgets } from "../components/TradingWidgets";
 
 const DASHBOARD_ACTIVITY_LIMIT = 10;
 
@@ -215,6 +216,8 @@ export function Dashboard() {
       )}
 
       <ActiveAgentsPanel companyId={selectedCompanyId!} />
+
+      <TradingWidgets companyId={selectedCompanyId!} />
 
       {data && (
         <>
