@@ -5,7 +5,7 @@
  * donuts and drift indicators built as elements (rather than a charting lib)
  * are smaller, easier to direct-label, and keep identity out of colour alone.
  */
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { useId, useMemo, useRef, useState } from "react";
 import { cn, compactMoney, money, num, pct, signedPct } from "./theme.js";
 
 export type Json = Record<string, unknown>;
@@ -81,52 +81,128 @@ export function Empty({ children }: { children: React.ReactNode }) {
 
 /* ------------------------------------------------------- equity time series */
 
+/**
+ * Equity curve — hand-rolled SVG, deliberately.
+ *
+ * This was recharts, which cost ~930KB of bundle for exactly one chart and, more
+ * importantly, is a large dependency to push through the host's plugin loader:
+ * that loader fetches the module text, rewrites bare specifiers to blob URLs,
+ * and imports the result, so every transitive import has to survive a shim.
+ * Fewer moving parts is worth more here than a charting API.
+ *
+ * Keeps what actually matters: a 2px line, a soft fill, a recessive baseline
+ * grid, a hover crosshair with a readout, and a value axis. Renders in a
+ * viewBox with `preserveAspectRatio="none"` for the fill/line, while text is
+ * drawn in screen units so it never scales oddly.
+ */
 export function EquityCurve({ data, height = 220, currency = "$" }: {
   data: Array<{ i: number; v: number }>;
   height?: number;
   currency?: string;
 }) {
-  if (data.length < 2) {
+  const gradId = useId();
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const [hover, setHover] = useState<number | null>(null);
+
+  const geom = useMemo(() => {
+    if (data.length < 2) return null;
+    const values = data.map((d) => d.v);
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    // Pad the domain so the line never sits on the frame.
+    const pad = (max - min) * 0.08 || Math.abs(max) * 0.02 || 1;
+    const lo = min - pad;
+    const hi = max + pad;
+    const x = (i: number) => (i / (data.length - 1)) * 100;
+    const y = (v: number) => 100 - ((v - lo) / (hi - lo)) * 100;
+    const line = data.map((d, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(3)},${y(d.v).toFixed(3)}`).join(" ");
+    const area = `${line} L100,100 L0,100 Z`;
+    return { lo, hi, x, y, line, area, min, max };
+  }, [data]);
+
+  if (!geom) {
     return (
       <div className="flex items-center justify-center text-sm text-muted-foreground" style={{ height }}>
         Not enough history yet
       </div>
     );
   }
+
   const first = data[0].v;
   const last = data[data.length - 1].v;
-  const up = last >= first;
-  // Single series → no legend box; the panel title names it.
-  const stroke = up ? "var(--tdash-good)" : "var(--tdash-critical)";
+  // Single series → no legend; the panel title names it.
+  const stroke = last >= first ? "var(--tdash-good)" : "var(--tdash-critical)";
+  const active = hover === null ? null : data[hover];
+
+  function onMove(e: React.MouseEvent<HTMLDivElement>) {
+    const el = wrapRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const ratio = (e.clientX - rect.left) / rect.width;
+    const idx = Math.round(ratio * (data.length - 1));
+    setHover(Math.max(0, Math.min(data.length - 1, idx)));
+  }
+
+  const AXIS_W = 54;
+  const ticks = [geom.hi, (geom.hi + geom.lo) / 2, geom.lo];
 
   return (
-    <ResponsiveContainer width="100%" height={height}>
-      <AreaChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-        <defs>
-          <linearGradient id="tdash-equity" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={stroke} stopOpacity={0.18} />
-            <stop offset="100%" stopColor={stroke} stopOpacity={0.01} />
-          </linearGradient>
-        </defs>
-        <CartesianGrid vertical={false} stroke="var(--tdash-grid)" />
-        <XAxis dataKey="i" tick={{ fontSize: 10 }} tickLine={false} axisLine={false}
-          stroke="currentColor" className="text-muted-foreground" minTickGap={24} />
-        <YAxis width={54} tick={{ fontSize: 10 }} tickLine={false} axisLine={false}
-          stroke="currentColor" className="text-muted-foreground"
-          domain={["auto", "auto"]} tickFormatter={(v) => compactMoney(Number(v), currency)} />
-        <Tooltip
-          cursor={{ stroke: "currentColor", strokeOpacity: 0.35, strokeWidth: 1 }}
-          contentStyle={{
-            background: "hsl(var(--card))", border: "1px solid hsl(var(--border))",
-            borderRadius: 8, fontSize: 12,
-          }}
-          labelFormatter={(l) => `Point ${l}`}
-          formatter={(v) => [money(Number(v), currency, 2), "Equity"]}
-        />
-        <Area type="monotone" dataKey="v" stroke={stroke} strokeWidth={2}
-          fill="url(#tdash-equity)" dot={false} activeDot={{ r: 4 }} />
-      </AreaChart>
-    </ResponsiveContainer>
+    <div className="flex" style={{ height }}>
+      {/* Value axis in screen units, so labels never distort. */}
+      <div
+        className="flex flex-col justify-between text-[10px] text-muted-foreground tabular-nums pr-2 text-right"
+        style={{ width: AXIS_W }}
+      >
+        {ticks.map((t, i) => <span key={i}>{compactMoney(t, currency)}</span>)}
+      </div>
+
+      <div
+        ref={wrapRef}
+        className="relative flex-1 cursor-crosshair"
+        onMouseMove={onMove}
+        onMouseLeave={() => setHover(null)}
+      >
+        <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+          <defs>
+            <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={stroke} stopOpacity={0.18} />
+              <stop offset="100%" stopColor={stroke} stopOpacity={0.01} />
+            </linearGradient>
+          </defs>
+          {/* Recessive grid — horizontal only. */}
+          {[0, 50, 100].map((y) => (
+            <line key={y} x1="0" x2="100" y1={y} y2={y}
+              stroke="var(--tdash-grid)" strokeWidth="0.3" vectorEffect="non-scaling-stroke" />
+          ))}
+          <path d={geom.area} fill={`url(#${gradId})`} />
+          <path d={geom.line} fill="none" stroke={stroke} strokeWidth="2"
+            vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
+          {active && (
+            <>
+              <line x1={geom.x(hover!)} x2={geom.x(hover!)} y1="0" y2="100"
+                stroke="currentColor" strokeOpacity="0.35" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+              <circle cx={geom.x(hover!)} cy={geom.y(active.v)} r="4"
+                fill={stroke} stroke="var(--tdash-surface, #000)" strokeWidth="1.5"
+                vectorEffect="non-scaling-stroke" />
+            </>
+          )}
+        </svg>
+
+        {/* Readout, positioned in screen units above the crosshair. */}
+        {active && (
+          <div
+            className="pointer-events-none absolute top-1 rounded border bg-card px-2 py-1 text-[11px] shadow-sm tabular-nums"
+            style={{
+              left: `${geom.x(hover!)}%`,
+              transform: geom.x(hover!) > 60 ? "translateX(-100%)" : "translateX(4px)",
+            }}
+          >
+            <div className="font-medium">{money(active.v, currency, 2)}</div>
+            <div className="text-muted-foreground">point {active.i}</div>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 

@@ -74,9 +74,13 @@ const manifest: PaperclipPluginManifestV1 = {
         order: 10,
       },
       {
+        // A page slot without a routePath is never routable — the loader only
+        // registers routes for slots that declare one. Mounts at
+        // /:companyPrefix/trading ("trading" is not a reserved segment).
         type: "page",
         id: PAGE_SLOT_ID,
-        displayName: "Trading Dashboard",
+        routePath: "trading",
+        displayName: "Trading",
         exportName: "TradingDashboardPage",
         order: 20,
       },

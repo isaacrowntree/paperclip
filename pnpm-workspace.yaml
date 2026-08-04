@@ -6,6 +6,10 @@ packages:
   # forcing root pnpm-lock.yaml churn for their third-party deps.
   - "!packages/plugins/sandbox-providers/**"
   - packages/plugins/examples/*
+  # Installed as a local plugin at runtime (see ~/.paperclip/plugins), never
+  # built into the image — so keep it out of the root lockfile, exactly as the
+  # sandbox providers above.
+  - "!packages/plugins/plugin-trading-dashboard"
   # Keep this smoke fixture installable as a local plugin example without
   # forcing PRs to commit pnpm-lock.yaml for a new workspace importer.
   - "!packages/plugins/examples/plugin-orchestration-smoke-example"

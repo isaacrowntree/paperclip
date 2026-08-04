@@ -28,8 +28,7 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "lucide-react": "^0.550.0",
-    "recharts": "^3.8.1"
+    "lucide-react": "^0.550.0"
   },
   "devDependencies": {
     "@paperclipai/plugin-sdk": "workspace:*",
