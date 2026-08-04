@@ -1,0 +1,46 @@
+{
+  "name": "@paperclipai/plugin-trading-dashboard",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "Live portfolio and swing-trader widgets for the sovereign-ibkr-fund and trading-bot agents.",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "prebuild": "pnpm --filter @paperclipai/plugin-sdk ensure-build-deps",
+    "build": "node ./esbuild.config.mjs",
+    "dev": "node ./esbuild.config.mjs --watch",
+    "dev:ui": "paperclip-plugin-dev-server --root . --ui-dir dist/ui --port 4178",
+    "typecheck": "pnpm --filter @paperclipai/plugin-sdk ensure-build-deps && tsc --noEmit"
+  },
+  "paperclipPlugin": {
+    "manifest": "./dist/manifest.js",
+    "worker": "./dist/worker.js",
+    "ui": "./dist/ui/"
+  },
+  "keywords": [
+    "paperclip",
+    "plugin",
+    "trading",
+    "dashboard"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "lucide-react": "^0.550.0",
+    "recharts": "^3.8.1"
+  },
+  "devDependencies": {
+    "@paperclipai/plugin-sdk": "workspace:*",
+    "@types/node": "^22.20.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "esbuild": "^0.28.1",
+    "react-dom": "^19.2.7",
+    "typescript": "^5.7.3"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  }
+}
