@@ -332,12 +332,42 @@ function SectionHeader({ icon: Icon, title, badge, accent }: {
   );
 }
 
-/** Dashboard widget — condensed, and renders nothing when there is nothing to say. */
+/**
+ * Dashboard widget.
+ *
+ * Deliberately never renders `null` on the empty/error paths. The version this
+ * replaced returned null whenever it had no data, which makes "not configured",
+ * "worker errored" and "plugin not loading at all" indistinguishable from the
+ * outside — the exact ambiguity that hid a dead IBKR panel for months. If it is
+ * mounted, it says something.
+ */
 export function TradingWidgets({ context }: PluginPageProps) {
   const companyId = context.companyId ?? "";
-  const { data, loading } = usePluginData<StatusResponse>("status", { companyId });
-  if (loading || !data) return null;
-  if (!data.fund && !data.bot) return null;
+  const { data, loading, error } = usePluginData<StatusResponse>("status", { companyId });
+
+  if (loading) {
+    return <div className="text-xs text-muted-foreground">Loading trading data…</div>;
+  }
+  if (error) {
+    return (
+      <div className="text-xs text-destructive">
+        Trading: {error instanceof Error ? error.message : String(error)}
+      </div>
+    );
+  }
+  if (!data || (!data.fund && !data.bot)) {
+    return (
+      <div className="text-xs text-muted-foreground space-y-1">
+        <div className="font-medium text-foreground">Trading — no state found</div>
+        {data?.searched && (
+          <div className="font-mono text-[10px] leading-relaxed opacity-80">
+            <div>fund: {data.searched.fundDb}</div>
+            <div>bot: {data.searched.botDir}</div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   const f = data.fund ? fundFacts(data.fund.state) : null;
   const b = data.bot ? botFacts(data.bot.state, data.bot.trades) : null;
