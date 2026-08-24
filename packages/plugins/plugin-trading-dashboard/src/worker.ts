@@ -124,6 +124,23 @@ function readBotState(dir: string): { state: Json; trades: Json[] } | null {
 /* ---------------------------------------------------------------- plugin */
 
 const plugin = definePlugin({
+  /**
+   * This worker serves more than one company (the fund company and the trading
+   * company each have their own Trading page), so it must declare itself
+   * multi-company or the host fails closed: `configChanged` for a second,
+   * distinct company is rejected with CROSS_TENANT_CONFIG, that company never
+   * receives its config, and `accounts` silently falls back to the "both"
+   * default — showing each company the other's book, which is exactly what the
+   * per-company scoping exists to prevent.
+   *
+   * The contract this asserts (per-company state keyed on companyId) is already
+   * satisfied: configuration is pulled per request via `ctx.config.get(companyId)`
+   * rather than held worker-global, and the only state here is the read-through
+   * cache, which is keyed by companyId. The module constants above are derived
+   * from env and are company-independent.
+   */
+  multiCompanyConfig: true,
+
   async setup(ctx) {
     ctx.logger.info("trading-dashboard plugin setup");
 
