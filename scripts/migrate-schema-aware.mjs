@@ -54,8 +54,24 @@ const require = createRequire(import.meta.url);
 const DB_URL = process.env.DATABASE_URL;
 const SCHEMA = process.env.PAPERCLIP_DB_SCHEMA || "public";
 const DRY_RUN = process.argv.includes("--dry-run");
+/**
+ * `src/migrations`, NOT `dist/migrations`.
+ *
+ * packages/db resolves its own folder relative to the module that runs —
+ * `client.ts:9` does `new URL("./migrations", import.meta.url)` — and the
+ * package's `exports` map points at `./src/*.ts`, which is what the server
+ * actually loads (the container runs it through the tsx loader). So `src` is
+ * the set the server migrates against, always.
+ *
+ * `dist/migrations` is a build artefact, produced only by `pnpm -C packages/db
+ * build` (`cp -r src/migrations dist/migrations`), and nothing at runtime reads
+ * it. In the 2026-08-24 image it was stale at 0202 while `src` carried 0226.
+ * Pointed here, this script reported "No pending migrations" and exited 0 —
+ * after which the server hit 0203 and crashlooped, looking exactly like the
+ * failure this script exists to prevent.
+ */
 const MIGRATIONS_DIR =
-  process.env.PAPERCLIP_MIGRATIONS_DIR || "/app/packages/db/dist/migrations";
+  process.env.PAPERCLIP_MIGRATIONS_DIR || "/app/packages/db/src/migrations";
 
 function die(msg) {
   console.error(`[migrate] FATAL: ${msg}`);
@@ -140,6 +156,20 @@ try {
   const pending = files.filter((f) => !applied.has(f.hash));
 
   console.log(`[migrate] schema=${SCHEMA} total=${files.length} applied=${applied.size} pending=${pending.length}`);
+
+  // Staleness guard. The database can never have applied more migrations than
+  // the source of truth contains, so `applied > total` means MIGRATIONS_DIR is
+  // not the set the server will run — the stale-dist trap above. Failing here
+  // is strictly better than the alternative: reporting "No pending migrations",
+  // exiting 0, and letting the server crashloop on the first migration this
+  // directory has never heard of.
+  if (applied.size > files.length) {
+    die(
+      `stale migrations dir: ${MIGRATIONS_DIR} holds ${files.length} migration(s) but the ` +
+        `database has ${applied.size} applied. This is almost certainly dist/ lagging src/ — ` +
+        `re-point PAPERCLIP_MIGRATIONS_DIR at packages/db/src/migrations.`,
+    );
+  }
   if (pending.length === 0) {
     console.log("[migrate] No pending migrations");
   }
