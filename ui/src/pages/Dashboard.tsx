@@ -46,6 +46,8 @@ function getRecentIssues(issues: Issue[]): Issue[] {
 
 export function Dashboard() {
   const { selectedCompanyId, companies } = useCompany();
+  const companyPrefix =
+    companies.find((company) => company.id === selectedCompanyId)?.issuePrefix ?? null;
   const { openOnboarding } = useDialogActions();
   const location = useLocation();
   const { setBreadcrumbs } = useBreadcrumbs();
@@ -379,7 +381,13 @@ export function Dashboard() {
 
           <PluginSlotOutlet
             slotTypes={["dashboardWidget"]}
-            context={{ companyId: selectedCompanyId }}
+            // companyPrefix is what lets a widget build a link into its own
+            // page slot (mounted at /:companyPrefix/<routePath>). Omitting it
+            // doesn't fail loudly — the widget still renders, it just silently
+            // loses its only navigation affordance, which is how the trading
+            // dashboard shipped with no "View details" link at all.
+            // CompanySettingsPluginPage already passes it; this outlet didn't.
+            context={{ companyId: selectedCompanyId, companyPrefix }}
             className="grid gap-4 md:grid-cols-2"
             // design-allow(card-pattern): class-string prop consumed by the plugin outlet; a component can't be passed here (C5a Run 3)
             itemClassName="rounded-lg border bg-card p-4 shadow-sm"

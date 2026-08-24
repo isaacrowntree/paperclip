@@ -11,8 +11,8 @@
  * dashboard showed a flat portfolio with no indication of why.
  */
 import type { PluginPageProps } from "@paperclipai/plugin-sdk/ui";
-import { usePluginData } from "@paperclipai/plugin-sdk/ui";
-import { TrendingUp, TrendingDown, Activity, BarChart3, ShieldAlert } from "lucide-react";
+import { usePluginData, useHostContext, useHostNavigation } from "@paperclipai/plugin-sdk/ui";
+import { TrendingUp, TrendingDown, Activity, BarChart3, ShieldAlert, ArrowRight } from "lucide-react";
 import {
   AllocationBars, DriftBar, Empty, EquityCurve, Hero, Legend, Panel, Stat, StatusPill,
   TradesTable, type AllocRow, type Json, type Tone,
@@ -21,6 +21,7 @@ import { CSS, buildSleeveScale, cn, compactMoney, money, num, pct, signedPct } f
 
 interface Bot { state: Json; trades: Json[] }
 interface StatusResponse {
+  shown?: { fund: boolean; bot: boolean };
   fund: Bot | null;
   bot: Bot | null;
   searched?: { fundDb: string; botDir: string };
@@ -208,8 +209,24 @@ function botFacts(state: Json, trades: Json[]) {
     if (t.type === "BUY") return s - num(t.usdt);
     return s;
   }, 0);
+
+  // Portfolio composition. The bot is a two-asset book: stablecoin plus, when
+  // it has taken a trade, one BTC position. Marked at the last known price so
+  // the split reflects market value rather than entry cost.
+  const entry = (position?.entryTrade ?? null) as Json | null;
+  const qty = num(entry?.qty);
+  const mark = num(state.lastPrice) || num(entry?.price);
+  const positionValue = qty * mark;
+  const equity = portfolio + positionValue;
+  const composition = [
+    { label: "USDT", value: equity > 0 ? (portfolio / equity) * 100 : 100, amount: portfolio, group: "cash" },
+    ...(positionValue > 0
+      ? [{ label: "BTC", value: (positionValue / equity) * 100, amount: positionValue, group: "position" }]
+      : []),
+  ];
+
   return {
-    portfolio, peak, position,
+    portfolio, peak, position, positionValue, equity, composition, mark, qty,
     trailingStop: (state.trailingStop ?? null) as Json | null,
     regime: String(state.lastRegime ?? "unknown"),
     regimeSince: state.regimeSince as string | undefined,
@@ -217,6 +234,9 @@ function botFacts(state: Json, trades: Json[]) {
     lastStopLossAt: state.lastStopLossAt as string | undefined,
     drawdownPct: peak > 0 ? ((peak - portfolio) / peak) * 100 : 0,
     realised,
+    // The bot does not persist an equity series today (see README) — this stays
+    // empty until it does, rather than fabricating one from trades.
+    equityHistory: (Array.isArray(state.equityHistory) ? state.equityHistory : []) as number[],
   };
 }
 
@@ -296,22 +316,64 @@ function BotView({ state, trades }: { state: Json; trades: Json[] }) {
 
       <GatingState regime={b.regime} since={b.regimeSince} position={b.position} losses={b.consecutiveLosses} />
 
-      {b.position && entry && (
-        <Panel title="Open position">
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <Stat label="Entry" value={money(num(entry.price))} sub={`${num(entry.qty).toFixed(6)} BTC`} />
-            <Stat label="Stop loss" value={money(num(b.position.stopLossPrice))} tone="critical" />
-            <Stat label="Take profit" value={money(num(b.position.takeProfitPrice))} tone="good" />
-            <Stat
-              label="Trailing"
-              value={b.trailingStop ? money(num(b.trailingStop.highWaterMark)) : "—"}
-              sub={b.trailingStop ? `${num(b.trailingStop.trailPercent)}% trail` : undefined}
-            />
-          </div>
-        </Panel>
-      )}
+      <Panel title="Equity curve" right={b.equityHistory.length > 1 ? `${b.equityHistory.length} points` : undefined}>
+        <EquityCurve data={b.equityHistory.map((v, i) => ({ i: i + 1, v }))} />
+      </Panel>
 
-      <Panel title="Trade history">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Panel title="Allocation" right={`${b.composition.length} asset${b.composition.length === 1 ? "" : "s"}`}>
+          <AllocationBars
+            rows={b.composition.map((c, i) => ({
+              ...c,
+              color: i === 0 ? "var(--tdash-series-1)" : "var(--tdash-series-2)",
+            }))}
+          />
+          <Legend
+            items={[
+              { label: "cash (USDT)", color: "var(--tdash-series-1)" },
+              ...(b.positionValue > 0 ? [{ label: "position (BTC)", color: "var(--tdash-series-2)" }] : []),
+            ]}
+          />
+        </Panel>
+
+        <Panel title="Position" right={b.mark ? `mark ${money(b.mark)}` : undefined}>
+          {b.position && entry ? (
+            <div className="grid grid-cols-2 gap-3">
+              <Stat label="Entry" value={money(num(entry.price))} sub={`${num(entry.qty).toFixed(6)} BTC`} />
+              <Stat label="Market value" value={money(b.positionValue)} />
+              <Stat label="Stop loss" value={money(num(b.position.stopLossPrice))} tone="critical" />
+              <Stat label="Take profit" value={money(num(b.position.takeProfitPrice))} tone="good" />
+              {b.trailingStop && (
+                <Stat
+                  label="Trailing"
+                  value={money(num(b.trailingStop.highWaterMark))}
+                  sub={`${num(b.trailingStop.trailPercent)}% trail`}
+                />
+              )}
+            </div>
+          ) : (
+            <Empty>Flat — 100% in stablecoin</Empty>
+          )}
+        </Panel>
+      </div>
+
+      <Panel title="Risk">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <Stat label="Peak equity" value={money(b.peak)} />
+          <Stat label="Drawdown" value={pct(b.drawdownPct)} tone={drawdownTone(b.drawdownPct)} />
+          <Stat
+            label="Loss streak"
+            value={b.consecutiveLosses > 0 ? String(b.consecutiveLosses) : "0"}
+            tone={b.consecutiveLosses >= 3 ? "critical" : b.consecutiveLosses > 0 ? "warn" : "good"}
+          />
+          <Stat
+            label="Last stop-out"
+            value={b.lastStopLossAt ? new Date(b.lastStopLossAt).toLocaleDateString() : "never"}
+          />
+        </div>
+      </Panel>
+
+      <Panel title="Trade history" right={`${trades.length} total`}>
         <TradesTable trades={trades} />
       </Panel>
     </div>
@@ -333,6 +395,33 @@ function SectionHeader({ icon: Icon, title, badge, accent }: {
 }
 
 /**
+ * Build a path to one of this plugin's own page slots, which mount under the
+ * active company prefix (`/:companyPrefix/<routePath>`).
+ *
+ * `companyPrefix` is optional on `PluginHostContext`, and not every host
+ * surface fills it in — the dashboard widget outlet passed only `companyId`,
+ * so the widget's sole navigation affordance silently disappeared while
+ * everything else about it kept working. That's fixed host-side, but the
+ * fallback stays: losing the link is a worse failure than deriving the prefix
+ * from the URL we're already rendering inside.
+ *
+ * The first path segment is the company prefix for any company-scoped route.
+ * Bail out on the known global prefixes so we never fabricate a company path.
+ */
+function companyRoutePath(companyPrefix: string | null | undefined, routePath: string): string | null {
+  const prefix = companyPrefix?.trim();
+  if (prefix) return `/${prefix}/${routePath}`;
+
+  if (typeof window === "undefined") return null;
+  const first = window.location.pathname.split("/").filter(Boolean)[0];
+  if (!first) return null;
+  // Global (non-company-scoped) roots — a link built from these would 404.
+  const GLOBAL = new Set(["settings", "admin", "auth", "login", "onboarding", "plugins", "api", "_plugins"]);
+  if (GLOBAL.has(first.toLowerCase())) return null;
+  return `/${first}/${routePath}`;
+}
+
+/**
  * Dashboard widget.
  *
  * Deliberately never renders `null` on the empty/error paths. The version this
@@ -343,6 +432,9 @@ function SectionHeader({ icon: Icon, title, badge, accent }: {
  */
 export function TradingWidgets({ context }: PluginPageProps) {
   const companyId = context.companyId ?? "";
+  const nav = useHostNavigation();
+  // routePath "trading" is mounted under the company prefix.
+  const fullPath = companyRoutePath(context.companyPrefix, "trading");
   const { data, loading, error } = usePluginData<StatusResponse>("status", { companyId });
 
   if (loading) {
@@ -375,10 +467,23 @@ export function TradingWidgets({ context }: PluginPageProps) {
   return (
     <div className="tdash space-y-3">
       <Styles />
-      <h3 className="text-sm font-medium flex items-center gap-1.5">
-        <TrendingUp className="h-4 w-4 text-muted-foreground" />
-        Trading
-      </h3>
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-sm font-medium flex items-center gap-1.5">
+          <TrendingUp className="h-4 w-4 text-muted-foreground" />
+          Trading
+        </h3>
+        {/* Through to the full view. The widget is a summary; without this the
+            detailed page is only reachable by typing the URL. */}
+        {fullPath && (
+          <a
+            {...nav.linkProps(fullPath)}
+            className="text-[11px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
+          >
+            View details
+            <ArrowRight className="h-3 w-3" />
+          </a>
+        )}
+      </div>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
         {f && <Stat label="Fund NAV" value={compactMoney(f.navBase)} sub={`${f.holdings.length} positions`} />}
         {f && <Stat label="Fund drawdown" value={pct(f.drawdownPct)} tone={drawdownTone(f.drawdownPct)} />}
@@ -409,23 +514,33 @@ export function TradingDashboardPage({ context }: PluginPageProps) {
     );
   }
 
+  // `shown` is per-company config: a company that does not own a book omits
+  // that section entirely rather than showing an empty one. Older responses
+  // without the field fall back to showing both.
+  const showFund = data?.shown ? data.shown.fund : true;
+  const showBot = data?.shown ? data.shown.bot : true;
+
   return (
     <div className="tdash p-6 space-y-8 max-w-7xl">
       <Styles />
 
-      <section>
-        <SectionHeader icon={TrendingUp} title="Sovereign Fund" badge="IBKR" accent="text-emerald-500" />
-        {data?.fund
-          ? <FundView state={data.fund.state} trades={data.fund.trades} />
-          : <NotConnected what="Fund" where={data?.searched?.fundDb} />}
-      </section>
+      {showFund && (
+        <section>
+          <SectionHeader icon={TrendingUp} title="Sovereign Fund" badge="IBKR" accent="text-emerald-500" />
+          {data?.fund
+            ? <FundView state={data.fund.state} trades={data.fund.trades} />
+            : <NotConnected what="Fund" where={data?.searched?.fundDb} />}
+        </section>
+      )}
 
-      <section>
-        <SectionHeader icon={TrendingDown} title="Swing Trader" badge="BTC/USDT" accent="text-amber-500" />
-        {data?.bot
-          ? <BotView state={data.bot.state} trades={data.bot.trades} />
-          : <NotConnected what="Trading bot" where={data?.searched?.botDir} />}
-      </section>
+      {showBot && (
+        <section>
+          <SectionHeader icon={TrendingDown} title="Swing Trader" badge="BTC/USDT" accent="text-amber-500" />
+          {data?.bot
+            ? <BotView state={data.bot.state} trades={data.bot.trades} />
+            : <NotConnected what="Trading bot" where={data?.searched?.botDir} />}
+        </section>
+      )}
     </div>
   );
 }

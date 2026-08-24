@@ -127,9 +127,31 @@ const plugin = definePlugin({
   async setup(ctx) {
     ctx.logger.info("trading-dashboard plugin setup");
 
+    /**
+     * Short read-through cache.
+     *
+     * The fund ledger is a 400KB SQLite file with a ~1.3MB WAL on an SD card,
+     * and the UI polls. Re-reading it on every poll made the page visibly slow.
+     * The underlying data only changes on an agent heartbeat (4h), so a few
+     * seconds of staleness costs nothing and removes the repeated disk hit.
+     */
+    const cache = new Map<string, { at: number; value: unknown }>();
+    const CACHE_MS = 5_000;
+
     ctx.data.register("status", async (params) => {
       const companyId = typeof params.companyId === "string" ? params.companyId : "";
+
+      const cached = cache.get(companyId);
+      if (cached && Date.now() - cached.at < CACHE_MS) return cached.value;
+
       const config = companyId ? await ctx.config.get(companyId).catch(() => null) : null;
+
+      // Which book this company owns. Per-company config, so /IBK/trading shows
+      // the fund and /ZAC/trading shows the crypto bot rather than both pages
+      // showing both.
+      const accounts = typeof config?.accounts === "string" ? config.accounts : "both";
+      const wantFund = accounts === "both" || accounts === "fund";
+      const wantBot = accounts === "both" || accounts === "bot";
 
       const fundDb =
         typeof config?.fundDb === "string" && config.fundDb ? config.fundDb : DEFAULTS.fundDb;
@@ -137,20 +159,23 @@ const plugin = definePlugin({
         typeof config?.botDir === "string" && config.botDir ? config.botDir : DEFAULTS.botDir,
       );
 
-      const fund = await readFundState(fundDb);
-      const bot = readBotState(botDir);
+      const fund = wantFund ? await readFundState(fundDb) : null;
+      const bot = wantBot ? readBotState(botDir) : null;
 
-      if (!fund && !bot) {
-        // Name the paths. The old route returned a bare `{}`, so an empty panel
-        // was indistinguishable from a misconfigured path.
-        ctx.logger.warn("no bot state found", { fundDb, botDir });
-      }
+      if (wantFund && !fund) ctx.logger.warn("fund ledger not readable", { fundDb });
+      if (wantBot && !bot) ctx.logger.warn("bot state not readable", { botDir });
 
-      return {
+      const value = {
+        // `shown` distinguishes "this company does not own that book" from
+        // "the book is configured but unreadable" — the UI omits the section
+        // entirely in the first case and explains itself in the second.
+        shown: { fund: wantFund, bot: wantBot },
         fund: fund ? { state: fund.state, trades: fund.trades } : null,
         bot: bot ? { state: bot.state, trades: bot.trades } : null,
         searched: { fundDb, botDir },
       };
+      cache.set(companyId, { at: Date.now(), value });
+      return value;
     });
   },
 });
