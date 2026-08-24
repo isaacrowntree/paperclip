@@ -229,22 +229,29 @@ export function AllocationBars({ rows, currency = "$" }: { rows: AllocRow[]; cur
   if (rows.length === 0) return <Empty>No positions</Empty>;
   const max = Math.max(...rows.map((r) => r.value), 1);
 
+  // Label row above the bar rather than a 4-column grid. These panels sit in a
+  // half-width column, where a fixed 4-column track forced the value labels to
+  // wrap under the bar and read as a second row. Label-over-bar survives any
+  // container width, and keeps the direct value label the light-mode contrast
+  // relief depends on.
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-2">
       {rows.map((r) => (
-        <div key={r.label} className="grid grid-cols-[3.25rem_1fr_4rem_5.5rem] items-center gap-2 text-sm">
-          <span className="font-medium truncate">{r.label}</span>
-          <div className="h-2.5 rounded bg-muted/60 overflow-hidden">
+        <div key={r.label}>
+          <div className="flex items-baseline justify-between gap-2 text-sm leading-tight">
+            <span className="font-medium truncate">{r.label}</span>
+            <span className="shrink-0 tabular-nums text-xs">
+              {pct(r.value)}
+              <span className="text-muted-foreground ml-1.5">{money(r.amount, currency, 0)}</span>
+            </span>
+          </div>
+          <div className="mt-1 h-2 rounded bg-muted/60 overflow-hidden">
             <div
               className="h-full rounded"
               style={{ width: `${(r.value / max) * 100}%`, backgroundColor: r.color }}
-              title={`${r.label} — ${r.group}`}
+              title={`${r.label} — ${r.group} — ${pct(r.value)}`}
             />
           </div>
-          <span className="text-right tabular-nums text-xs">{pct(r.value)}</span>
-          <span className="text-right tabular-nums text-xs text-muted-foreground">
-            {money(r.amount, currency, 0)}
-          </span>
         </div>
       ))}
     </div>

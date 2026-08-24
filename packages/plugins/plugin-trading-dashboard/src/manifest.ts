@@ -44,6 +44,22 @@ const manifest: PaperclipPluginManifestV1 = {
        * to SQLite on a separate durable mount, so that path stopped existing and
        * the fund panel silently showed nothing.
        */
+      /**
+       * Which book this company owns.
+       *
+       * Config is resolved per-company (`ctx.config.get(companyId)`), so the
+       * IBKR Fund company shows only the fund and the Trading company shows
+       * only the crypto bot. Defaults to "both" so a single-company install
+       * still sees everything without configuring anything.
+       */
+      accounts: {
+        type: "string",
+        title: "Accounts shown",
+        enum: ["both", "fund", "bot"],
+        default: "both",
+        description:
+          "Which trading account this company's Trading page displays. 'fund' = sovereign-ibkr-fund only, 'bot' = crypto swing trader only.",
+      },
       fundDb: {
         type: "string",
         title: "Fund ledger (SQLite)",
